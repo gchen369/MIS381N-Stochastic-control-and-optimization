@@ -1,0 +1,133 @@
+---
+title: "Project_2"
+author: "George Chen, Dandi Chen, Anshika Ahuja"
+date: "February 27, 2020"
+output: pdf_document
+---
+
+# Calculate daily returns 
+
+```{r}
+source("readData.R")
+
+n <- nrow(priceMat)
+dailyReturn <- matrix(0,n-1,ncol(priceMat))
+
+for (i in c(1:ncol(priceMat))) {
+  dailyReturn[,i] <- diff(priceMat[,i])/priceMat[-n,i]
+}
+
+```
+
+# Find initial candidate for similarity matrix (the correlation matrix)
+
+```{r}
+  
+rho <- cor(dailyReturn, use="pairwise.complete.obs")
+
+```
+
+# Code integer program and find weights
+
+```{r}
+library(lpSolveAPI)
+source('constructFund.R')
+
+q <- 25
+
+weights = constructFund(rho, q, priceMat, sharesMat, unique_tickers, unique_dates)
+
+```
+
+# Construct portfolio and calculate the value of the index
+
+```{r}
+NASDAQ <- c(2660.93,
+            2731.53, 2738.58, 2818.69, 2887.44,
+            2981.76, 2909.60, 3090.19, 3073.81,
+            3218.20, 3377.73, 3487.82, 3592.00)
+
+# Shares bought in 2012 December
+shares <- weights * 1000000 / priceMat[250,]
+mktCap <- shares*priceMat[250,] 
+share_weight <-mktCap/sum(mktCap) 
+valIdx2012 <- share_weight %*% priceMat[250,]
+valIdx2012
+```
+
+Value of the custom index is 61.94685 during December 2012
+
+```{r}
+
+NASDAQReturn <- diff(NASDAQ)/NASDAQ[-length(-NASDAQ)]
+
+fundValue <- monthlyPriceMat %*% shares
+fundValue <- c(shares%*%priceMat[250,], fundValue)
+fundReturn <- diff(fundValue)/fundValue[-length(fundValue)]
+
+t <- seq(1,12)
+
+#cat("Correlation of returns:", cor(NASDAQReturn,fundReturn))
+
+# Make a basic graph
+plot( NASDAQReturn , type="b" , bty="l" , xlab="Time" , ylab="Returns", 
+      col=rgb(0.2,0.4,0.1,0.7) , lwd=3 , pch=17, ylim=c(-0.05,0.1))
+lines(fundReturn , col=rgb(0.8,0.4,0.1,0.7) , lwd=3 , pch=19 , type="b" )
+ 
+# Add a legend
+legend("bottomleft", 
+  legend = c("NASDAQ", "fund"), 
+  col = c(rgb(0.2,0.4,0.1,0.7), 
+  rgb(0.8,0.4,0.1,0.7)), 
+  pch = c(17,19), 
+  bty = "n", 
+  pt.cex = 2, 
+  cex = 1.2, 
+  text.col = "black", 
+  horiz = F , 
+  inset = c(0.1, 0.1))
+```
+
+Our fund tracks the NASDAQ pretty well, and it mostly outperforms it, except on October & November. Correlation of return between our passive index fund & NASDAQ is 0.817
+
+# Try another similarity measure, compare the results
+
+```{r}
+source("similarityMat.R")
+
+rho = similarityMat(priceMat, sharesMat, unique_tickers,unique_dates)
+
+weights2 = constructFund(rho, q, priceMat, sharesMat, unique_tickers, unique_dates)
+
+shares2 <- weights2 * 1000000 / priceMat[250,]
+fundValue2 <- monthlyPriceMat %*% shares2
+fundValue2 <- c(shares2%*%priceMat[250,], fundValue2)
+fundReturn2 <- diff(fundValue2)/fundValue2[-length(fundValue2)]
+
+# Make a basic graph
+plot( fundReturn , type="b" , bty="l" , xlab="Time" , ylab="Returns", 
+      col=rgb(0.2,0.4,0.1,0.7) , lwd=3 , pch=17, ylim=c(-0.05,0.1))
+lines(fundReturn2 , col=rgb(0.8,0.4,0.1,0.7) , lwd=3 , pch=19 , type="b" )
+ 
+# Add a legend
+legend("bottomleft", 
+  legend = c("Using correlation", "Using cosine similarity"), 
+  col = c(rgb(0.2,0.4,0.1,0.7), 
+  rgb(0.8,0.4,0.1,0.7)), 
+  pch = c(17,19), 
+  bty = "n", 
+  pt.cex = 2, 
+  cex = 1.2, 
+  text.col = "black", 
+  horiz = F , 
+  inset = c(0.1, 0.1))
+```
+
+```{r}
+cat("Using cosine similarity, correlation of returns with NASDAQ: ", cor(NASDAQReturn,fundReturn2), "\n")
+cat("Using correlation, correlation of returns with NASDAQ: ", cor(NASDAQReturn,fundReturn), "\n")
+```
+
+We used cosine similarity as our similarity metric, which measures the angle between two vectors. In our fund situation, this means that the cosine similarity between two stocks will be high when the daily price changes are in the same direction, regardless of the magnitude of the change. <br/>
+
+Since the goal of a passive fund is to track the broad market, the performance of our new fund is worse when compared to the old fund, measured by the correlation of returns between the new/old funds & NASDAQ. The old fund has a correlation of 0.817, and the new fund only has a correlation of 0.380

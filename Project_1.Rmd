@@ -1,0 +1,196 @@
+---
+title: "Project 1"
+author: "Pooja Dawada, Gaurav Choudhary, George Chen"
+date: "2/9/2020"
+output: pdf_document
+---
+
+# The Linear Program
+
+## 1. Formulate the problem
+
+```{r results='hide', warning=FALSE}
+library(lpSolveAPI)
+
+#create an LP model with 0 constraints and 10 decision variables
+budgetLP <- make.lp(0,10)
+
+#set objective coefficients
+set.objfn(budgetLP, c(0.031, 0.049, 0.024, 0.039, 0.016, 0.024, 0.046, 0.026, 0.033, 0.044))
+
+#set objective direction
+lp.control(budgetLP,sense='max')
+
+add.constraint(budgetLP, rep(1,10), "<=", 10000000, indices=c(1:10))
+add.constraint(budgetLP, c(1,1,-1,-1), "<=", 0, indices=c(1,2,5,10))
+add.constraint(budgetLP, c(2,2,-1,-1,-1,-1,-1), "<=", 0, indices=c(3:9))
+
+set.bounds(budgetLP, upper = rep(3000000,10))
+
+varNames <- c("print","tv","seo","adwords","facebook","linkedin","instagram","snapchat","twitter","email")
+constraintNames <- c("Budget","Print&tv<fb&email","social>2(seo+ad)")
+dimnames(budgetLP) <- list(constraintNames, varNames)
+
+#write to text file
+write.lp(budgetLP,'budget.lp',type='lp')
+
+```
+
+![](budgetlp.png)
+
+## 2. Solve the LP problem
+
+```{r}
+# solve the model
+solve(budgetLP)
+
+# return proposed solution
+alc1.obj = get.objective(budgetLP)
+alc1 <- get.variables(budgetLP)
+alc1.obj
+alc1
+```
+
+
+## 3. Write and test an allocation function
+
+```{r}
+ROI_vec <- c(0.031, 0.049, 0.024, 0.039, 0.016, 0.024, 0.046, 0.026, 0.033, 0.044)
+upper_bound <- 3000000
+budget <- 10000000
+
+source("allocation_g5.R")
+alc1 <- allocation(ROI_vec, upper_bound, budget)
+alc1$objval
+alc1$sol
+```
+
+
+## 4. Find optimal objective value without the 3rd constraint, and compare with *alc1*
+
+```{r}
+source("allocation_g5.R")
+alc2 <- allocation(ROI_vec, NA, budget)
+alc2$objval
+alc2$sol
+```
+
+Without the 3rd constraint, budget originally for AdWords & Instagram are given to TV & Email, which makes sense, because the goal is to search for platforms that provide the largest ROI, as long as they adhere to the **Print&tv<fb&email** and **social>2(seo+ad)** constraints.
+
+
+# The Optimizers' Curse
+
+## Get the optimal objective & solution with the new ROI vector
+
+```{r}
+ROI_vec_new <- c(0.049, 0.023, 0.024, 0.039, 0.044, 0.046, 0.026, 0.019, 0.037, 0.026)
+upper_bound <- 3000000
+budget <- 10000000
+
+source("allocation_g5.R")
+alc3 <- allocation(ROI_vec_new, upper_bound, budget)
+alc3$objval
+alc3$sol
+```
+
+Allocation is not the same with the new ROI vector, more emphasis is placed on Print/Facebook/Linkedin, and less emphasis is placed on TV/Instagram/Email. But the objective value is the same
+
+## Calculate the disappointment for alc2/alc2, and discuss if the 3rd constraint is valuable
+
+```{r}
+
+# Dissapointment for alc1
+alc1_disappointment = sum(alc1$sol * ROI_vec) - sum(alc1$sol * ROI_vec_new)
+alc1_disappointment
+
+# Dissapointment for alc2
+alc2_disappointment = sum(alc2$sol * ROI_vec) - sum(alc2$sol * ROI_vec_new)
+alc2_disappointment
+
+
+```
+
+Without constraint 3, the dissapointment is higher. Which means the CMO's constraint does add value to the optimization.
+
+
+## Find an allocaiton that dominates alc1/2/3, using both old and new ROI vectors
+
+```{r}
+
+avg_alc1 = (sum(alc1$sol * ROI_vec) + sum(alc1$sol * ROI_vec_new))/2
+avg_alc2 = (sum(alc2$sol * ROI_vec) + sum(alc2$sol * ROI_vec_new))/2
+avg_alc3 = (sum(alc3$sol * ROI_vec) + sum(alc3$sol * ROI_vec_new))/2
+max_obj = max(avg_alc1,avg_alc2,avg_alc3)
+
+cat("avg objective value for alc1: ",avg_alc1,"\navg objective value for alc2: ",avg_alc2,"\navg objective value for alc3: ",avg_alc3,"\nMax of these 3 is ",max_obj,"\n")
+
+ROI_old <- c(0.031, 0.049, 0.024, 0.039, 0.016, 0.024, 0.046, 0.026, 0.033, 0.044)
+ROI_new <- c(0.049, 0.023, 0.024, 0.039, 0.044, 0.046, 0.026, 0.019, 0.037, 0.026)
+
+
+uBound_vec <- seq(1000000,5000000,500000)
+source("allocation_g5.R")
+
+for (i in uBound_vec) { #Testing different bounds
+  
+  alc4 <- allocation(pmin(ROI_new,ROI_old), i, budget) #Tweaking the ROI
+  alc4_avg <- (sum(alc4$sol * ROI_vec) + sum(alc4$sol * ROI_vec_new))/2
+  
+  foundFlag <- alc4_avg > max_obj
+    
+  if (foundFlag) {
+    cat("Bound is ",i,"\n")
+    break
+  }  
+}
+
+cat("Avg of roi old and new for alc4 is ", alc4_avg,"\n And the allocation is \n")
+alc4$sol
+```
+
+With the allocation above, the average objective values of both the new and old ROI vectors beat alc1/alc2/alc3.
+
+
+# Multi Period Allocation
+
+## Find the optimal solution for the whole year
+
+```{r}
+
+load(file="Project1.RData")
+ROI_vec <- c(ROI_mat/100)
+
+res <- matrix(0,12,10)
+ttl <- c(rep(0,13))
+
+alc_1 <- allocation(ROI_vec[seq(1,120,12)], 3000000, 10000000)
+res[1,] <- alc_1$sol
+ttl[2] <- 10000000 + alc_1$sol %*% ROI_vec[seq(1,120,12)] 
+
+for (i in 2:12) {
+  
+  alc <- allocation(ROI_vec[seq(i,120,12)], 3000000, ttl[i])
+  assign(paste("alc_",i,sep= ""), alc)
+  res[i,] <- alc$sol
+  ttl[i+1] <- ttl[i] + alc$sol %*% ROI_vec[seq(i,120,12)]
+  
+}
+
+rownames(res) <- rownames(ROI_mat)
+colnames(res) <- colnames(ROI_mat)
+res
+```
+
+
+## What's the connection between the multi-period and previous single-period problem?
+
+The multi-period problem adds the optimal objective and the budget of the previous period, and sets it as the budget as the current period. So the multi-period is the single-period looped over while updating the budget along the loop.
+
+
+## If the monthly change should be no more than 1M, does the previous conenction still hold?
+
+```{r}
+diff(res) > 1000000
+```
+
+From the results above, we can see that some platforms has their budgets change by more than 1M in some of the months. Because of this, after adding the 'stable relationship' constraint, the optimization solution will change.

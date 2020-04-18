@@ -1,0 +1,180 @@
+---
+title: "project5_g15"
+author: "Amey Athaley, Sachin Balakrishnan, George Chen"
+date: "April 17, 2020"
+output: pdf_document
+---
+
+# 1. Show goodness of fits
+
+```{r}
+N = 5000
+load('queue.Rdata')
+library(MASS)
+set.seed(1337)
+
+# Gamma
+ia = diff(A)
+fit.gamma.ia = fitdistr(ia, 'gamma', lower = 0.001)
+simdata = qgamma(ppoints(length(ia)), fit.gamma.ia$estimate[1], fit.gamma.ia$estimate[2])
+qqplot(simdata,ia)
+
+```
+```{r}
+# Gamma
+fit.gamma.S = fitdistr(S, 'gamma', lower = 0.001)
+simdata = qgamma(ppoints(length(S)), fit.gamma.S$estimate[1], fit.gamma.S$estimate[2])
+qqplot(simdata,S)
+
+```
+
+
+```{r}
+# Exponential
+ia = diff(A)
+fit.exp = fitdistr(ia, 'exponential', lower = 0.001)
+simdata = qexp(ppoints(length(ia)), fit.exp$estimate[1])
+qqplot(simdata,ia)
+
+```
+```{r}
+fit.exp = fitdistr(S, 'exponential', lower = 0.001)
+simdata = qexp(ppoints(length(S)), fit.exp$estimate[1])
+qqplot(simdata,S)
+
+```
+
+
+```{r}
+# Weibull
+ia = diff(A)
+fit.weib = fitdistr(ia, 'weibull', lower = 0.001)
+simdata = qweibull(ppoints(length(ia)), fit.weib$estimate[1], fit.weib$estimate[2])
+qqplot(simdata,ia)
+
+```
+```{r}
+# Weibull
+fit.weib = fitdistr(S, 'weibull', lower = 0.001)
+simdata = qweibull(ppoints(length(S)), fit.weib$estimate[1], fit.weib$estimate[2])
+qqplot(simdata,S)
+```
+
+
+Based on our results above, the gamma distribution seems to be the best fit for both inter-arrival time and service time.
+
+# 2. Simulate the queuing system (customers join queues randomly)
+
+```{r}
+counters = 20
+obj = rep(0,20)
+
+for (ctr in 1:counters) {
+
+T = replicate(ctr, list(0))
+D = replicate(ctr, list(0))
+W = replicate(ctr, list(0))
+
+choice = sample(1:ctr,N,replace=TRUE)
+
+tau = rgamma(N, fit.gamma.ia$estimate[1], fit.gamma.ia$estimate[2])
+S = rgamma(N, fit.gamma.S$estimate[1], fit.gamma.S$estimate[2])
+
+A = c(0,cumsum(tau))
+for (i in 1:ctr) {
+  T[[i]][1] = 0
+  D[[i]][1] = S[match(i,choice)]
+  W[[i]][1] = 0
+}
+for (i in 2:N){
+  join = choice[i]
+  T[[join]] = append(T[[join]], max(D[[join]][length(D[[join]]-1)],A[i])) 
+  D[[join]] = append(D[[join]], T[[join]][length(T[[join]])] + S[i])
+  W[[join]] = append(W[[join]],T[[join]][length(T[[join]])] - A[i])
+}
+
+ttl.salary = 0
+for (i in 1:ctr) {
+  ttl.salary = ttl.salary + D[[i]][length(D[[i]])] - A[[i]][1]
+}
+ttl.salary = ttl.salary * 40/60
+
+cnt.annoyed = 0
+for (i in 1:ctr) {
+  for (j in W[[i]]) {
+    if (j>10) {cnt.annoyed=cnt.annoyed+1}
+  }
+}
+
+obj[ctr] = ttl.salary + cnt.annoyed
+}
+```
+
+
+```{r}
+plot(1:counters,obj,type="l",xlab='Open counters',ylab='Expected Cost')
+```
+```{r}
+obj[15]
+```
+
+According to our simulation, 15 open counters is the optimal number, and the expected cost is $7314.019 (under the situation when customers randomly join a queue)
+
+
+# 3. Simulate the queue (all queues combined)
+
+```{r}
+counters = 20
+obj = rep(0,20)
+
+for (ctr in 1:counters) {
+
+T = replicate(ctr, list(0))
+D = replicate(ctr, list(0))
+W = replicate(ctr, list(0))
+
+tau = rgamma(N, fit.gamma.ia$estimate[1], fit.gamma.ia$estimate[2])
+S = rgamma(N, fit.gamma.S$estimate[1], fit.gamma.S$estimate[2])
+A = c(0,cumsum(tau))
+
+for (i in 1:ctr) {
+  T[[i]][1] = 0
+  D[[i]][1] = S[i]
+  W[[i]][1] = 0
+}
+
+for (i in (ctr+1):N) {
+  earliest.depart = vapply(D,tail,1,FUN.VALUE=numeric(1))
+  join = which.min(earliest.depart)
+  T[[join]] = append(T[[join]], max(D[[join]][length(D[[join]]-1)],A[i])) 
+  D[[join]] = append(D[[join]], T[[join]][length(T[[join]])] + S[i])
+  W[[join]] = append(W[[join]],T[[join]][length(T[[join]])] - A[i])
+}
+
+ttl.salary = 0
+for (i in 1:ctr) {
+  ttl.salary = ttl.salary + D[[i]][length(D[[i]])] - A[[i]][1]
+}
+ttl.salary = ttl.salary * 40/60
+
+cnt.annoyed = 0
+for (i in 1:ctr) {
+  for (j in W[[i]]) {
+    if (j>10) {cnt.annoyed=cnt.annoyed+1}
+  }
+}
+
+obj[ctr] = ttl.salary + cnt.annoyed
+
+}
+```
+
+```{r}
+plot(1:counters,obj,type="l",xlab='Open counters',ylab='Expected Cost')
+```
+
+```{r}
+obj[13]
+```
+
+According to our simulation, 13 is the optimal number of the counters, and $5750.829 is the expected cost (under the situation when all queues are combined and customers joins any counter that opens up)

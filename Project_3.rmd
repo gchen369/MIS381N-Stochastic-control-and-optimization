@@ -1,0 +1,172 @@
+---
+title: "project3_g7"
+author: "Alisha Fernandes, George Chen, Palakh Gupta"
+date: "March 28, 2020"
+output: pdf_document
+---
+
+## Load files
+
+```{r message=FALSE, warning=FALSE}
+#install.packages('imager')
+#install.packages('multimode')
+#install.packages('tidyverse')
+#library(tidyverse)
+#install.packages('imager')
+#install.packages('multimode')
+
+library(imager)
+library(multimode)
+library(imager)
+library(igraph)
+library(imager)
+library(multimode)
+library(ggplot2)
+```
+
+```{r}
+#setwd('D:\\Palakh Data\\Downloads')
+pic1 = load.image("Pic1.jpg")
+pic2 = load.image("Pic2.jpg")
+pic3 = load.image("Pic3.jpg")
+pic4 = load.image("Pic4.jpg")
+
+```
+
+## Thresholding segmentation
+```{r}
+## Function to do segmentation using thresholding
+threshold_segmentation = function(image)
+{
+  ## Assuming a bimodal distribution, we can consider the mean as the threshold
+  threshold = mean(image)
+  ## Convert the pixels to 1 & 0 depending on if it is greater or less than the threshold
+  new_image_list = sapply(image,function(x) ifelse(x<=threshold,0,1))
+  ## Convert this list to a matrix having same dimensions as the original image
+  new_image_matrix = matrix(new_image_list, dim(image)[1],dim(image)[2])
+  ## Convert the matrix to a grayscale image
+  new_image = as.cimg(new_image_matrix,dims=c(dim(image)[1],dim(image)[2],1,1))
+  return (new_image%>% plot)
+}
+
+threshold_segmentation(pic1)
+threshold_segmentation(pic2)
+threshold_segmentation(pic3)
+threshold_segmentation(pic4)
+```
+
+Alternatively we can use the function Thresholding
+```{r}
+
+for (i in seq(1,4)){
+result = paste('Pic',i,'.jpg',sep='')
+print(result)
+pic = load.image(result)
+#plot(pic2)
+#summary(pic2)
+image= grayscale(pic)
+means = mean(pic)
+converted_img = threshold(image,means,binary) 
+plot(converted_img)
+}
+```
+## Min-cut/Max-flow segmentation
+
+
+```{r}
+# Bounding box - area excuding outer frame (width 10 pixels) 
+get_avg_intensity = function(image) {
+  a_bar = mean(image[10:dim(image)[1]-10,10:dim(image)[1]-10])
+  b_bar = (sum(image) - sum(image[10:dim(image)[1]-10,10:dim(image)[1]-10]))/(dim(image)[1]*dim(image)[1]-109*109)
+  return(list(a_bar,b_bar))
+}
+
+```
+
+
+```{r}
+
+picture = pic3
+
+pf = get_avg_intensity(picture)[[1]]
+pb = get_avg_intensity(picture)[[2]]
+
+for (i in c(1:nrow(picture))) {
+  for (j in c(1:ncol(picture))) {
+    A[i,j] = -log(abs(picture[i,j]-pf)/(abs(picture[i,j]-pf)+abs(picture[i,j]-pb)))
+    B[i,j] = -log(abs(picture[i,j]-pb)/(abs(picture[i,j]-pf)+abs(picture[i,j]-pb)))
+  }
+}
+
+df = tibble(from=character(),
+            to=character(),
+            capacity=double())
+
+for (i in c(1:nrow(picture))) {
+  for (j in c(1:ncol(picture))) {
+    df = add_row(df, from='s', to=dim(image)[1]*(i-1)+j, capacity = A[i,j])
+    df = add_row(df, from=dim(image)[1]*(i-1)+j, to='t', capacity = B[i,j])
+  }
+}
+
+for (i in 1:(dim(image)[1]-1)) {
+  for (j in 1:(dim(image)[2]-1)) {
+    
+    df = add_row(df, from=dim(image)[2]*(i-1)+j,to=dim(image)[2]*(i-1)+j+1,
+                 capacity=0.01*exp(-(picture[i,j]-picture[i,j+1])^2)) 
+    df = add_row(df, from=dim(image)[2]*(i-1)+j, to=dim(image)[2]*i+j,
+                 capacity=0.01*exp(-(picture[i,j]-picture[i+1,j])^2))
+    df = add_row(df, from=dim(image)[2]*(i-1)+j+1, to=dim(image)[2]*(i-1)+j,
+                 capacity=0.01*exp(-(picture[i,j]-picture[i,j+1])^2))
+    df = add_row(df, from=dim(image)[2]*i+j, to=dim(image)[2]*(i-1)+j,
+                 capacity=0.01*exp(-(picture[i,j]-picture[i+1,j])^2))
+    
+  }
+}
+
+for (i in 1:(dim(image)[2]-1)) {
+  df = add_row(df, from=dim(image)[2]+dim(image)[2]*(i-1),              
+               to=dim(image)[2]+dim(image)[2]*i,
+               capacity=0.01*exp(-(picture[i,dim(image)[2]]-picture[i+1,dim(image)[2]])^2))
+  df = add_row(df, from=dim(image)[2]*(dim(image)[1]-1)+i, 
+               to=dim(image)[2]*(dim(image)[1]-1)+i+1,
+               capacity=0.01*exp(-(picture[dim(image)[1],i]-picture[dim(image)[1],i+1])^2))
+  df = add_row(df, from=dim(image)[2]+dim(image)[2]*i, 
+               to=dim(image)[2]+dim(image)[2]*(i-1),
+               capacity=0.01*exp(-(picture[i,dim(image)[2]]-picture[i+1,dim(image)[2]])^2))
+  df = add_row(df, from=dim(image)[2]*(dim(image)[1]-1)+i+1, 
+               to=dim(image)[2]*(dim(image)[1]-1)+i,
+               capacity=0.01*exp(-(picture[dim(image)[1],i]-picture[dim(image)[1],i+1])^2))
+}
+
+g = graph_from_data_frame(df)
+res = max_flow(g, source=V(g)["s"], target=V(g)["t"])
+
+
+fg = rep(0,16384)
+bg = rep(0,16384)
+foreground = res$partition1[2:length(res$partition1)]
+background = res$partition2[1:(length(res$partition2)-2)]
+
+
+for (i in foreground) {
+  if (i <= 16384) {
+    fg[i] = 1
+  }
+    
+}
+for (i in background) {
+  if (i <= 16384){
+    bg[i] = 1
+  }
+  
+}
+
+
+rb_img = as.cimg(c(bg,rep(0,16384),fg),x=dim(image)[1],y=dim(image)[1],cc=3)
+rb_img = imrotate(rb_img, 90, 64, 64, interpolation = 1L, boundary = 0L)
+rb_img = mirror(rb_img,"x")
+plot(rb_img)
+
+```
+```
